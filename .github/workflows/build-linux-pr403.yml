@@ -14,13 +14,30 @@ jobs:
     container: alpine:3.23@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659
     env:
       RUSTUP_TOOLCHAIN: nightly-x86_64-unknown-linux-musl
-      RUSTFLAGS: "-Znext-solver=coherence"
+      RUSTFLAGS: "-Znext-solver=coherence -Clink-args=-lgcc -Ctarget-cpu=x86-64-v2"
 
     steps:
       - name: Install Linux and musl build dependencies
         run: |
           apk update
           apk add --no-cache build-base musl-dev bash cmake git curl file tar
+
+      - name: Verify static GCC runtime and popcount symbol
+        run: |
+          libgcc="$(gcc -print-libgcc-file-name)"
+          echo "GCC runtime archive: $libgcc"
+          test -f "$libgcc"
+          case "$libgcc" in *.a) ;; *) echo "Expected static libgcc archive"; exit 1 ;; esac
+          nm --defined-only "$libgcc" | grep -Eq '[[:space:]]__popcountdi2$'
+          scratch="$(mktemp -d)"
+          cat > "$scratch/popcount.c" <<'EOF'
+          extern int __popcountdi2(unsigned long long);
+          int main(void) { return __popcountdi2(7ULL) == 3 ? 0 : 1; }
+          EOF
+          gcc -c -fno-pie -o "$scratch/popcount.o" "$scratch/popcount.c"
+          nm -u "$scratch/popcount.o" | grep -q '__popcountdi2'
+          gcc -static -no-pie -o "$scratch/popcount" "$scratch/popcount.o" -lgcc
+          "$scratch/popcount"
 
       - name: Check out PR #403 commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
