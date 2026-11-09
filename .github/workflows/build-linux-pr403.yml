@@ -14,7 +14,7 @@ jobs:
     container: alpine:3.23@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659
     env:
       RUSTUP_TOOLCHAIN: nightly-x86_64-unknown-linux-musl
-      RUSTFLAGS: ""
+      RUSTFLAGS: "-Znext-solver=coherence"
 
     steps:
       - name: Install Linux and musl build dependencies
