@@ -1,0 +1,110 @@
+name: "Build PackSquash PR #403 for Linux"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux-musl:
+    name: Build x86_64 Linux musl binary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    container: alpine:3.23@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659
+    env:
+      RUSTUP_TOOLCHAIN: nightly-x86_64-unknown-linux-musl
+      RUSTFLAGS: ""
+
+    steps:
+      - name: Install Linux and musl build dependencies
+        run: |
+          apk update
+          apk add --no-cache build-base musl-dev bash cmake git curl file
+
+      - name: Check out PR #403 commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: d2b33a4ee7404de80dc5513d5f97443138cc3f9f
+          fetch-depth: 0
+
+      - name: Install Rust nightly and rust-src
+        uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
+        with:
+          toolchain: nightly-x86_64-unknown-linux-musl
+          target: x86_64-unknown-linux-musl
+          components: rust-src
+          rustflags: ""
+
+      - name: Confirm source commit and PR #403 shader fix
+        run: |
+          test "$(git rev-parse HEAD)" = "d2b33a4ee7404de80dc5513d5f97443138cc3f9f"
+          grep -En 'INCLUDE_DIRECTIVE_MATCHER|include_directives_are_handled_like_unresolvable_imports' \
+            packages/packsquash/src/pack_file/shader_file/parser.rs \
+            packages/packsquash/src/pack_file/shader_file/tests.rs
+
+      - name: Run shader tests, including PR #403 coverage
+        run: cargo test --package packsquash --target x86_64-unknown-linux-musl --release pack_file::shader_file
+
+      - name: Build optimized release binary
+        run: >-
+          cargo build --target x86_64-unknown-linux-musl --release
+          -Z build-std
+          -Z build-std-features=panic-unwind
+
+      - name: Verify Linux ELF, architecture, static linking, and version
+        run: |
+          binary=target/x86_64-unknown-linux-musl/release/packsquash
+          file "$binary"
+          readelf -h "$binary" | grep -Eq 'Class:[[:space:]]+ELF64'
+          readelf -h "$binary" | grep -Eq 'Machine:[[:space:]]+Advanced Micro Devices X86-64'
+          if readelf -l "$binary" | grep -q ' INTERP '; then
+            echo "Unexpected dynamic ELF interpreter"
+            exit 1
+          fi
+          if readelf -d "$binary" 2>&1 | grep -q 'NEEDED'; then
+            echo "Unexpected shared-library dependency"
+            exit 1
+          fi
+          file "$binary" | grep -q 'statically linked'
+          "$binary" --version
+
+      - name: Package executable and installation instructions
+        run: |
+          mkdir -p dist
+          install -m 755 target/x86_64-unknown-linux-musl/release/packsquash dist/packsquash
+          cat > dist/README.txt <<'EOF'
+          PackSquash PR #403 Linux binary
+
+          Version: PackSquash v0.4.1-62-gd2b33a4e
+          Source commit: d2b33a4ee7404de80dc5513d5f97443138cc3f9f
+          Target: x86_64-unknown-linux-musl (64-bit Linux, musl libc)
+          Build: release; Rust nightly; standard library built with panic-unwind
+          Runtime dependencies: no external shared libraries; statically linked musl binary.
+
+          Install on UltraServers
+          -----------------------
+          Extract this archive, then run:
+
+            install -m 755 packsquash /home/container/plugins/Nexo/pack/packsquash/packsquash.exe
+
+          Nexo expects that exact filename. The .exe suffix is only a filename on Linux;
+          the file remains a native Linux executable. The install command also sets execute permission.
+
+          Check the installation with:
+
+            /home/container/plugins/Nexo/pack/packsquash/packsquash.exe --version
+          EOF
+          printf 'Rust compiler: %s\n' "$(rustc --version)" >> dist/README.txt
+          tar -czf packsquash-linux-x86_64-musl.tar.gz -C dist packsquash README.txt
+          test "$(tar -tzf packsquash-linux-x86_64-musl.tar.gz | sort)" = "README.txt
+          packsquash"
+          tar -tvzf packsquash-linux-x86_64-musl.tar.gz | grep -Eq '^-rwxr-xr-x.* packsquash$'
+
+      - name: Upload Linux musl artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: packsquash-linux-x86_64-musl
+          path: packsquash-linux-x86_64-musl.tar.gz
+          if-no-files-found: error
+          retention-days: 30
