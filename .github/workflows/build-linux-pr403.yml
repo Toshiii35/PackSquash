@@ -20,13 +20,16 @@ jobs:
       - name: Install Linux and musl build dependencies
         run: |
           apk update
-          apk add --no-cache build-base musl-dev bash cmake git curl file
+          apk add --no-cache build-base musl-dev bash cmake git curl file tar
 
       - name: Check out PR #403 commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           ref: d2b33a4ee7404de80dc5513d5f97443138cc3f9f
           fetch-depth: 0
+
+      - name: Configure Git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Install Rust nightly and rust-src
         uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
