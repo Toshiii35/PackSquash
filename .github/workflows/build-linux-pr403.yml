@@ -86,7 +86,7 @@ jobs:
             echo "Unexpected shared-library dependency"
             exit 1
           fi
-          file "$binary" | grep -q 'statically linked'
+          file "$binary" | grep -Eq 'statically linked|static-pie linked'
           "$binary" --version
 
       - name: Package executable and installation instructions
